@@ -5,49 +5,59 @@ from collections import Counter
 import datetime
 import io
 
-# --- 1. एनालिसिस इंजन ---
-def get_advanced_analysis(df, s_name, target_date):
+# --- 1. गैप और कटिंग एनालिसिस (Gap Analysis) ---
+def get_gap_logic(df, s_name, target_date):
     try:
-        # B कॉलम (Index 1) तारीख है, s_name वाला कॉलम डेटा है
+        # डेटा साफ़ करना
         df_clean = df[['DATE_COL', s_name]].copy()
         df_clean.columns = ['DATE', 'NUM']
-        
-        # तारीखों को साफ़ करना
         df_clean['DATE'] = pd.to_datetime(df_clean['DATE'], errors='coerce').dt.date
         df_clean['NUM'] = pd.to_numeric(df_clean['NUM'], errors='coerce')
         df_clean = df_clean.dropna(subset=['DATE', 'NUM'])
 
-        if len(df_clean) < 10:
+        if len(df_clean) < 20:
             return "Data Kam", "N/A"
 
-        # वार (Day) निकालना
-        target_day_name = target_date.strftime('%A')
-        hindi_days = {'Monday': 'सोमवार', 'Tuesday': 'मंगलवार', 'Wednesday': 'बुधवार', 'Thursday': 'वीरवार', 'Friday': 'शुक्रवार', 'Saturday': 'शनिवार', 'Sunday': 'रविवार'}
+        # A. गैप लॉजिक (Gap Logic)
+        # वे नंबर जो पिछले 15-20 दिनों से बिल्कुल नहीं आए (ठंडे नंबर)
+        recent_15 = df_clean[df_clean['DATE'] < target_date].tail(15)['NUM'].astype(int).tolist()
+        all_nums = set(range(100))
+        missing_nums = list(all_nums - set(recent_15))
         
-        day_data = df_clean[df_clean['DATE'].apply(lambda x: x.strftime('%A') if hasattr(x, 'strftime') else "") == target_day_name]
-        hot_day_num = Counter(day_data['NUM'].astype(int)).most_common(1)[0][0] if not day_data.empty else 0
+        # B. हरुफ़ रोटेशन (Digit Rotation)
+        # पिछले 3 दिनों के अंदर और बाहर के अंकों को जोड़कर अगली चाल
+        last_3 = recent_15[-3:]
+        andar_h = [n // 10 for n in last_3]
+        bahar_h = [n % 10 for n in last_3]
         
-        recent_30 = df_clean[df_clean['DATE'] < target_date].tail(30)['NUM'].astype(int).tolist()
-        last_5 = df_clean[df_clean['DATE'] < target_date].tail(5)['NUM'].astype(int).tolist()
-        hot_list = [n for n, c in Counter(recent_30).most_common(10)]
-        pakad_nums = [n for n in hot_list if n not in last_5][:2]
-        pakad_display = ", ".join([f"{n:02d}" for n in pakad_nums]) if pakad_nums else "--"
+        # सबसे ज्यादा सक्रिय हरुफ़
+        best_a = Counter(andar_h).most_common(1)[0][0]
+        best_b = Counter(bahar_h).most_common(1)[0][0]
 
-        analysis = f"📅 **{hindi_days.get(target_day_name)}** HOT: {hot_day_num:02d} | 🔥 पकड़: {pakad_display}"
+        # C. क्रॉस-कटिंग (Cutting)
+        # पिछले नंबर की राशि और उसका जोड़
+        last_val = last_3[-1]
+        mirror = (last_val + 50) % 100
+        total_sum = (last_val // 10 + last_val % 10) % 10
+
+        analysis = f"🎯 सक्रिय हरुफ़: {best_a}, {best_b} | ➕ जोड़ चाल: {total_sum} | 🪞 मिरर: {mirror:02d}"
         
-        # टॉप 3 मास्टर अंक
-        p1 = f"{hot_day_num:02d}"
-        p2 = f"{(hot_day_num+50)%100:02d}"
-        p3 = f"{(int(last_5[-1]) if last_5 else 0):02d}"
+        # --- टॉप 3 मास्टर रोटेशन (Top 3 Only for High Focus) ---
+        # 1. बेस्ट अंदर + बेस्ट बाहर
+        p1 = f"{(best_a * 10) + best_b:02d}"
+        # 2. पिछले नंबर का मिरर
+        p2 = f"{mirror:02d}"
+        # 3. जोड़ और सक्रिय हरुफ़ का मेल
+        p3 = f"{(total_sum * 10) + best_b:02d}"
         
         return analysis, f"{p1} | {p2} | {p3}"
 
     except Exception as e:
-        return f"Wait..", "N/A"
+        return f"Processing..", "N/A"
 
 # --- 2. UI सेटअप ---
-st.set_page_config(page_title="MAYA AI Master", layout="wide")
-st.title("🎯 MAYA AI: Same-Day Fix (Final)")
+st.set_page_config(page_title="MAYA AI Gap Master", layout="wide")
+st.title("🎯 MAYA AI: Gap & Rotation Logic")
 
 uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'])
 
@@ -55,30 +65,27 @@ if uploaded_file:
     try:
         df = pd.read_excel(io.BytesIO(uploaded_file.getvalue()), engine='openpyxl')
         
-        # आपके स्क्रीनशॉट के हिसाब से कॉलम सेट करना
-        # Column B (Index 1) is Date
+        # तारीख कॉलम (Index 1) सेट करना
         df['DATE_COL'] = pd.to_datetime(df.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
         
-        # आपके शीट के असली कॉलम नाम: DS, FD, GD, GL, DB, SG, ZA
+        # आपकी शीट के कॉलम: DS, FD, GD, GL, DB, SG, ZA
         shift_cols = [c for c in ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA'] if c in df.columns]
 
         target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
 
-        if st.button("🚀 विश्लेषण शुरू करें"):
+        if st.button("🚀 रोटेशन विश्लेषण शुरू करें"):
             results_list = []
             
-            # तारीख का सटीक मिलान
+            # SAME DAY मिलान
             selected_row = df[df['DATE_COL'] == target_date]
 
             for s in shift_cols:
-                logic_info, top_picks = get_advanced_analysis(df, s, target_date)
+                logic_info, top_picks = get_gap_logic(df, s, target_date)
                 
-                # 'SAME DAY' वैल्यू निकालना
                 actual_val = "--"
                 if not selected_row.empty:
                     raw_val = str(selected_row[s].values[0]).strip()
-                    # अगर नंबर है तो 02d फॉर्मेट, वरना जैसा है (XX)
-                    if raw_val.replace('.','',1).isdigit() or (raw_val.startswith('-') and raw_val[1:].isdigit()):
+                    if raw_val.replace('.','',1).isdigit():
                         actual_val = f"{int(float(raw_val)):02d}"
                     else:
                         actual_val = raw_val
@@ -86,14 +93,14 @@ if uploaded_file:
                 results_list.append({
                     "Shift": s,
                     "📍 SAME DAY": actual_val,
-                    "🗓️ विश्लेषण": logic_info,
-                    "🌟 टॉप मास्टर अंक": top_picks
+                    "🗓️ अंकों की चाल (Rotation)": logic_info,
+                    "🌟 टॉप 3 रोटेशन": top_picks
                 })
 
             st.table(pd.DataFrame(results_list))
             
             if selected_row.empty:
-                st.warning(f"⚠️ आपकी एक्सेल में तारीख '{target_date.strftime('%d/%m/%Y')}' नहीं मिली।")
+                st.warning(f"⚠️ तारीख '{target_date.strftime('%d/%m/%Y')}' एक्सेल में नहीं मिली।")
             
             st.balloons()
 
