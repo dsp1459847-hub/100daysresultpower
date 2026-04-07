@@ -5,73 +5,69 @@ from collections import Counter
 import datetime
 import io
 
-# --- 1. पावरफुल एनालिसिस इंजन ---
+# --- 1. एनालिसिस इंजन ---
 def get_advanced_analysis(df, s_name, target_date):
     try:
-        # डेटा को साफ़ करना (B=तारीख, Shift Column=डेटा)
+        # डेटा को साफ़ करना (B=Index 1)
         df_clean = df.iloc[:, [1, df.columns.get_loc(s_name)]].copy()
         df_clean.columns = ['DATE', 'NUM']
         
-        # तारीखों को साफ़ करना ताकि मैच हो सके
+        # तारीखों को 'Universal' फॉर्मेट में बदलना
         df_clean['DATE'] = pd.to_datetime(df_clean['DATE'], errors='coerce').dt.date
         df_clean['NUM'] = pd.to_numeric(df_clean['NUM'], errors='coerce')
         df_clean = df_clean.dropna(subset=['DATE', 'NUM'])
 
-        if len(df_clean) < 15:
+        if len(df_clean) < 10:
             return "Data Kam", "N/A"
 
-        # साप्ताहिक वार (Monday, Tuesday...)
+        # वार (Day)
         target_day_name = target_date.strftime('%A')
         hindi_days = {'Monday': 'सोमवार', 'Tuesday': 'मंगलवार', 'Wednesday': 'बुधवार', 'Thursday': 'वीरवार', 'Friday': 'शुक्रवार', 'Saturday': 'शनिवार', 'Sunday': 'रविवार'}
-        day_in_hindi = hindi_days.get(target_day_name, target_day_name)
-
-        # उस 'वार' का हॉट नंबर
-        day_data = df_clean[df_clean['DATE'].apply(lambda x: x.strftime('%A')) == target_day_name]
+        
+        day_data = df_clean[df_clean['DATE'].apply(lambda x: x.strftime('%A') if hasattr(x, 'strftime') else "") == target_day_name]
         hot_day_num = Counter(day_data['NUM'].astype(int)).most_common(1)[0][0] if not day_data.empty else 0
         
-        # पकड़ नंबर (Pakad) - पिछले 30 दिनों का डेटा
         recent_30 = df_clean[df_clean['DATE'] < target_date].tail(30)['NUM'].astype(int).tolist()
         last_5 = df_clean[df_clean['DATE'] < target_date].tail(5)['NUM'].astype(int).tolist()
         hot_list = [n for n, c in Counter(recent_30).most_common(10)]
         pakad_nums = [n for n in hot_list if n not in last_5][:2]
         pakad_display = ", ".join([f"{n:02d}" for n in pakad_nums]) if pakad_nums else "--"
 
-        analysis = f"📅 **{day_in_hindi}** का HOT: {hot_day_num:02d} | 🔥 पकड़: {pakad_display}"
+        analysis = f"📅 **{hindi_days.get(target_day_name)}** HOT: {hot_day_num:02d} | 🔥 पकड़: {pakad_display}"
+        selection = f"{hot_day_num:02d} | {(hot_day_num+50)%100:02d} | {(int(last_5[-1] if last_5 else 0)+11)%100:02d}"
         
-        # टॉप मास्टर अंक (02d फॉर्मेट)
-        p1 = f"{hot_day_num:02d}"
-        p2 = f"{(hot_day_num+50)%100:02d}"
-        p3 = f"{(int(last_5[-1] if last_5 else 0)+11)%100:02d}"
-        
-        return analysis, f"{p1} | {p2} | {p3}"
+        return analysis, selection
 
     except Exception as e:
         return f"Error: {str(e)}", "N/A"
 
-# --- 2. UI सेटअप (डिफ़ॉल्ट फॉर्मेट के लिए) ---
+# --- 2. UI सेटअप ---
 st.set_page_config(page_title="MAYA AI Master", layout="wide")
-st.title("🎯 MAYA AI: 5-Year Default Format Engine")
+st.title("🎯 MAYA AI: Same-Day Final Fix")
 
-uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें (B=Date Format)", type=['xlsx'])
+uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'], key="final_fix_v7")
 
 if uploaded_file:
     try:
         file_bytes = uploaded_file.getvalue()
+        # एक्सेल लोड करना
         df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
         
-        # C से I कॉलम की शिफ्ट्स (Column Index 2 to 8)
+        # B=Date (1), C-I=Shifts (2-8)
         shift_cols = list(df.columns[2:9]) 
 
-        # यूजर से तारीख इनपुट (कैलेंडर)
+        # कैलेंडर
         target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
 
         if st.button("🚀 विश्लेषण शुरू करें"):
-            # --- SAME DAY MATCH LOGIC ---
+            # --- 💡 SAME DAY MATCHING LOGIC (The Fix) ---
             df_match = df.copy()
-            # B कॉलम (Index 1) की तारीखों को साफ़ करना
-            df_match.iloc[:, 1] = pd.to_datetime(df_match.iloc[:, 1], errors='coerce').dt.date
             
-            # चुनी हुई तारीख का मिलान
+            # तारीख के कॉलम को स्ट्रिंग (String) से असली तारीख में बदलना
+            # दिन, महीना, साल - किसी भी क्रम में हो, ये उसे पहचान लेगा
+            df_match.iloc[:, 1] = pd.to_datetime(df_match.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
+            
+            # तारीख का मिलान करना
             selected_row = df_match[df_match.iloc[:, 1] == target_date]
 
             results_list = []
@@ -81,12 +77,13 @@ if uploaded_file:
                 # 'SAME DAY' वैल्यू निकालना
                 actual_val = "--"
                 if not selected_row.empty:
-                    val = str(selected_row[s].values[0]).strip()
-                    # अगर नंबर है तो 02d फॉर्मेट, वरना जैसा है (XX)
-                    if val.replace('.','',1).isdigit():
-                        actual_val = f"{int(float(val)):02d}"
+                    # सेल से वैल्यू उठाना
+                    raw_val = str(selected_row[s].values[0]).strip()
+                    # अगर नंबर है तो 02d फॉर्मेट, वरना जैसा है (जैसे XX)
+                    if raw_val.replace('.','',1).isdigit():
+                        actual_val = f"{int(float(raw_val)):02d}"
                     else:
-                        actual_val = val
+                        actual_val = raw_val
 
                 results_list.append({
                     "Shift": s,
@@ -97,13 +94,15 @@ if uploaded_file:
 
             st.table(pd.DataFrame(results_list))
             
+            # अगर फिर भी नहीं मिला तो ये मैसेज दिखेगा
             if selected_row.empty:
-                st.warning(f"⚠️ सूचना: आपकी एक्सेल में तारीख '{target_date}' का डेटा अभी नहीं मिला।")
-            
+                st.warning(f"⚠️ चेतावनी: एक्सेल की दूसरी (B) कॉलम में '{target_date.strftime('%d-%m-%Y')}' तारीख नहीं मिली।")
+                st.write("आपके एक्सेल के पहले 5 तारीखें ये हैं:", df_match.iloc[:5, 1].values)
+
             st.balloons()
 
     except Exception as e:
         st.error(f"Error: {e}")
 else:
-    st.info("कृपया अपनी 5 साल की एक्सेल फ़ाइल अपलोड करें।")
+    st.info("एक्सेल फ़ाइल अपलोड करें।")
     
